@@ -22,6 +22,8 @@
 | 2026-06-04 | **P3 联调完成**：`main.py` 三轮对话（推荐 / 多轮预约 / 转专业越界）；实录写入 `docs/实验报告.md` §4 | 已采纳 | 终端截图 `docs/images/p3-main-cli-test-2026-06-04.png`（示例假数据） |
 | 2026-06-04 | 本地语义模型：`EMBEDDING_LOCAL_ONLY`、repo_id 修正、`warmup()`；`docs/名词解释.md` 扩充 | 已采纳 | 校园网可不连 huggingface.co |
 | 2026-06-04 | **P5 Gradio**：新增 `app.py`，共用 `Conversation`；`requirements.txt` 增加 gradio | 已采纳 | `python app.py` → http://127.0.0.1:7860 |
+| 2026-06-04 | P5 网页联调（篮球场馆推荐）；`app.py` 加 `inbrowser=True`；README 网页使用说明 | 已采纳 | 图 2：`docs/image/实验报告/gradio-p5-2026-06-04.png` |
+| 2026-06-04 | 实验报告 §4 整理（CLI 图 1 + Gradio 图 2）；**Git 已全部 push** | 已完成 | 今日收工，见「暂停接续备忘」 |
 
 > **维护约定**：每完成一轮有意义的协作（定方案、改模块、联调、写报告段落等），在表中追加一行，并同步更新「当前进度」与「待办」。
 
@@ -40,33 +42,36 @@
 
 ```
 knowledge/*.md
-    → indexer.py --rebuild → data/chunks.json [+ embeddings.npz]
-用户问题 → retriever.py（向量或关键词）→ main.py → llm.py(DeepSeek)
+    → indexer.py --rebuild → data/chunks.json + embeddings.npz（本机）
+用户问题 → retriever.py（语义向量，可回退关键词）
+         → conversation.py + prompts.py
+         → main.py（CLI）/ app.py（Gradio）→ llm.py(DeepSeek)
 ```
 
 | 文件 | 职责 | 实现状态 |
 |------|------|----------|
-| `indexer.py` / `embedder.py` | P1 切块、P2 向量化 | 代码已提交 |
-| `retriever.py` | 语义检索；无向量时回退关键词 | 已实现 |
-| `data/chunks.json` | RAG 切块索引 | 6 段（2 个示例 md 切块而来） |
-| `knowledge/*.md` | 场馆文档 | **2 个文件**（任务书要求 **≥15 个** .md，非 15 个切块） |
-| `data/embeddings.npz` | 向量索引 | **本机待生成**（HuggingFace 曾超时） |
-| `config.py` | 含向量相关项 | **用户需对照 example 补全** |
-| `llm.py` / `main.py` / `test_*` | P0 流程 | 用户曾跑通 `test_llm.py` |
-| `knowledge/` | 示例体育馆、游泳馆 共 2 个 md | 待补至 **≥15 个**本校场馆文件 |
+| `indexer.py` / `embedder.py` | P1 切块、P2 向量化；本地离线加载 | 已提交 |
+| `retriever.py` | 语义检索；无向量时回退关键词 | 已联调 |
+| `conversation.py` / `prompts.py` | P3 多轮 + 边界 | 已联调 |
+| `main.py` / `app.py` | CLI / Gradio 入口（共用 Conversation） | 已联调 |
+| `data/chunks.json` | RAG 切块索引 | 6 段（2 个示例 md） |
+| `data/embeddings.npz` | 向量索引 | 本机已生成（gitignore，队友需 `--rebuild`） |
+| `knowledge/*.md` | 场馆文档 | **2 个示例**（任务书要求 **≥15 个**本校 .md） |
+| `config.py` | 含 Key、向量、镜像项 | 仅本地，勿提交 |
 
 ### 3. 当前进度
 
 - [x] P0：DeepSeek + CLI + GitHub  
-- [x] P1 代码；`data/chunks.json` 已生成（6 段）  
-- [ ] P2 向量：`embeddings.npz` 待本机 `--rebuild`（建议 HF 镜像）  
-- [ ] `config.py` 补全 P1/P2 配置项（见暂停备忘）  
-- [ ] `knowledge/` **≥15 个**场馆 `.md` 文件  
-- [x] **P3** 多轮 + 边界（代码完成）  
-- [x] **P3 联调**：`python main.py` 三轮实测（示例知识库）；截图见下文  
-- [ ] `knowledge/` **≥15 个** `.md` 本校文件  
-- [x] P5 Gradio（`app.py`）  
-- [ ] 实验报告 §一–三/五；Gradio 网页截图  
+- [x] P1：`indexer.py`、`data/chunks.json`（6 段）  
+- [x] P2：语义向量检索（本机 `embeddings.npz` + `EMBEDDING_LOCAL_ONLY` 离线加载）  
+- [x] P3：多轮 + 边界；`main.py` 三轮联调 + 终端截图  
+- [x] P5：Gradio `app.py` 联调 + 网页截图；README 网页说明  
+- [x] 实验报告 **§4**（CLI + Gradio 测试，标注假数据）  
+- [x] **Git push**（2026-06-04 收工前已完成）  
+- [ ] `knowledge/` **≥15 个**本校场馆 `.md` → `--rebuild` → 复测并更新报告图  
+- [ ] 实验报告 **§一、二、三、五**（背景、方案、过程、总结）  
+- [ ] 可选 P6：引用标注、有无 RAG 对比实验  
+- [ ] 按 `docs/测试用例.md` 补测 T3–T6（追问「第二个」、`reset` 等）
 
 ### 4. 建议的下一步（优先级）
 
@@ -74,23 +79,30 @@ knowledge/*.md
 
 ### 4b. 暂停接续备忘（回来先做）
 
-**当前状态（2026-06-04）**：P0–P3 联调已跑通（`main.py` 三轮 + 边界）；知识库仍为 **2 个示例 md（假数据）**；实验报告 §4 已写文字实录 + 截图。
+**收工状态（2026-06-04）**：P0–P3、P5 已跑通；CLI + Gradio 测试写入 `docs/实验报告.md` §4（图 1 终端、图 2 网页）；`README.md` 含 Gradio 使用说明；代码已 **push** 至 `Yu-lorde/AI-Powered-Campus-Venue`。知识库仍为 **2 个示例 md（假数据）**。
 
-1. 激活环境：`cd` 项目根目录 → `.\.venv\Scripts\Activate.ps1`  
-2. 在 `knowledge/` 补满 **≥15 个**本校场馆 `.md` → `python indexer.py --rebuild`  
-3. 可选：按 `docs/测试用例.md` 补测 T4–T6（`reset`、追问「第二个」等）  
-4. 后续：P5 Gradio、完善实验报告 §一–三/五  
-5. Git：`git add .` → `commit` → `push`（勿含 `config.py`）
+**下次优先（按顺序）：**
+
+1. `cd` 项目根目录 → `.\.venv\Scripts\Activate.ps1`  
+2. **`knowledge/` 补满 ≥15 个本校场馆 `.md`**（任务书硬性要求）  
+3. `python indexer.py --rebuild`（改库后必做）  
+4. 用 `main.py` / `app.py` 复测同一批用例，更新实验报告截图与文字  
+5. 撰写实验报告 §一–三、§五；对照任务书核对评分点  
+6. 可选：`docs/测试用例.md` T3–T6；P6 对比实验  
+7. 提交前再确认：无 `config.py` 入库
+
+**无需重做**：`app.py` / `conversation.py` 骨架；补数据后一般只 rebuild + 复测 + 改报告。
 
 ### 5. 与新 AI 协作时的推荐开场
 
 复制下面一段话发给 AI，可快速恢复上下文：
 
 ```text
-我在做「校园智能场馆匹配平台」（人工智能基础 A 大作业）。
-项目路径：d:\大学启动\人工智能基础A\大作业\校园智能场馆匹配平台
-请先阅读 docs/AI协作日志.md 和 README.md，在现有 retriever + llm + main 骨架上继续开发。
-当前待办：P3 代码已有，下次先 `python main.py` 联调测试；见日志「暂停接续备忘」
+继续「校园智能场馆匹配平台」（人工智能基础 A 大作业）。
+路径：d:\大学启动\人工智能基础A\大作业\校园智能场馆匹配平台
+请先读 docs/AI协作日志.md、README.md、docs/实验报告.md。
+P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
+下次优先：补 knowledge ≥15 个本校文件 → indexer --rebuild → 完善报告 §一–三/五。
 ```
 
 ### 6. 技术决策备忘（避免重复讨论）
@@ -98,7 +110,7 @@ knowledge/*.md
 | 决策点 | 当前选择 | 可变更条件 |
 |--------|----------|------------|
 | 脚手架来源 | 对齐「方向一-知识问答助手」目录结构 | 若任务书明确要求其他结构再调整 |
-| 检索方式 | 简单关键词计分 | 知识库变大或同义词多时改向量检索 |
+| 检索方式 | **sentence_transformers 语义向量**（`EMBEDDING_LOCAL_ONLY` 离线） | 校园网可改 `tfidf` 开发；无向量时关键词回退 |
 | LLM 接入 | OpenAI 兼容 SDK（`openai` 包） | 若用国内 API，改 `API_BASE` 即可 |
 | 配置管理 | `config.example.py` + 本地 `config.py`（勿提交密钥） | 可改用 `.env` + `python-dotenv` |
 
@@ -106,7 +118,7 @@ knowledge/*.md
 
 - **Python**：用户环境中有 3.13（见 Cursor `settings.json` 中 python 路径）  
 - **编辑器**：Cursor；已装 `cweijan.vscode-office` 预览 docx  
-- **运行入口**：项目根目录执行 `python main.py`
+- **运行入口**：`python main.py`（CLI）或 `python app.py`（Gradio，http://127.0.0.1:7860）
 
 ### 8. 协作日志更新模板（复制使用）
 
@@ -159,9 +171,14 @@ knowledge/*.md
   3. 转专业 → 越界拒答，未编造场馆  
 - **产出**：`docs/实验报告.md` §4 文字实录；终端风格截图如下（由 `scripts/render_terminal_screenshot.py` 根据实录生成，标注假数据）：
 
-![P3 main.py 联调截图（示例知识库 / 假数据）](images/p3-main-cli-test-2026-06-04.png)
+- **CLI 截图**：`docs/image/实验报告/1780555211614.png`（报告图 1）
 
-- **待办**：替换 ≥15 个本校 md 后复测并更新报告截图。
+### 2026-06-04 — P5 Gradio 网页（收工）
+
+- **启动**：`python app.py`；终端显示 `Running on local URL: http://127.0.0.1:7860` 为**正常**（服务占用终端，Ctrl+C 结束）；`inbrowser=True` 可自动开浏览器。  
+- **实测**：篮球场馆推荐（东区体育中心）；库内无「提供用球」信息时不编造。  
+- **文档**：`README.md` 新增「网页使用说明」；`docs/实验报告.md` §4.3 + 图 2 `gradio-p5-2026-06-04.png`。  
+- **Git**：用户确认当日变更已 push。
 
 ### 2026-06-03 — P1/P2 代码落地（用户暂离）
 
@@ -178,9 +195,12 @@ knowledge/*.md
 | 路径 | 说明 |
 |------|------|
 | `校园智能场馆匹配平台/*` | 2026-06-03 一次性初始化的全部脚手架 |
-| `docs/images/p3-main-cli-test-2026-06-04.png` | P3 CLI 联调截图（示例假数据） |
-| `docs/实验报告.md` §4 | 三轮对话实录 + 图 1 |
-| `scripts/render_terminal_screenshot.py` | 可重新生成报告用终端截图 |
+| `docs/image/实验报告/1780555211614.png` | 报告图 1：CLI 联调 |
+| `docs/image/实验报告/gradio-p5-2026-06-04.png` | 报告图 2：Gradio 网页 |
+| `docs/实验报告.md` §4 | CLI + 网页测试实录 |
+| `app.py` | P5 Gradio 入口 |
+| `README.md` | 含「网页使用说明（Gradio）」 |
+| `scripts/render_terminal_screenshot.py` | 可选：根据终端文本生成示意图 |
 | `Cursor/User/settings.json` | 仅用户本机；为 docx/Markdown 编辑器关联，**不属于项目仓库** |
 
 ---
@@ -211,8 +231,8 @@ knowledge/*.md
 | P5 | Gradio 网页 | 新增 `app.py` |
 | P6 | 加分项：引用标注、有无知识库对比实验 | `main.py` / 报告 |
 
-**P0 已完成**；**P1 部分完成**（6 段索引）；**P2 待本机 rebuild 向量**。
+**P0–P3、P5 已完成并 push**；**P2 本机向量已用**；**待办**：知识库 ≥15 md、报告 §一–三/五、可选 P6。
 
 ---
 
-*最后更新：2026-06-04（P3 main 联调完成，报告 §4 + 截图已入库）*
+*最后更新：2026-06-04 收工（P5 Gradio + 报告 §4 双截图 + README + 已 push；下次补 knowledge 与报告正文）*
