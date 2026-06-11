@@ -61,6 +61,8 @@ def _normalize_hit(chunk: dict, score: float | None = None) -> dict:
         "text": chunk.get("text", chunk.get("content", "")),
         "name": chunk.get("title") or Path(chunk.get("source", "")).stem,
         "content": chunk.get("text", chunk.get("content", "")),
+        "start_line": chunk.get("start_line", "?"),  # 添加这行
+        "end_line": chunk.get("end_line", "?"),      # 添加这行
     }
     if score is not None:
         hit["score"] = round(float(score), 4)
