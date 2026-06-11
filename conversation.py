@@ -46,7 +46,15 @@ class Conversation:
 
         if getattr(config, "USE_TWO_STAGE_RETRIEVAL", True):
             retrieval_q = build_enhanced_retrieval_query(user_input, self.raw_history)
-            chunks = retrieve_for_prompt(retrieval_q)
+            # 检索始终用用户原话，避免 reweight 削弱「羽毛球」等具体词
+            chunks = retrieve_for_prompt(user_input)
+            if retrieval_q != user_input:
+                extra = retrieve_for_prompt(retrieval_q)
+                seen = {c.get("id") for c in chunks}
+                for c in extra:
+                    if c.get("id") not in seen:
+                        chunks.append(c)
+                        seen.add(c.get("id"))
             user_msg = build_enhanced_rag_user_message(user_input, chunks)
         else:
             retrieval_q = build_retrieval_query(user_input, self.raw_history)

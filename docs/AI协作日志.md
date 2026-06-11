@@ -28,6 +28,9 @@
 | 2026-06-11 | **修复 `prompts.py` 语法错误**：`build_rag_user_message` 两段合并代码叠在一起，`blocks.append(` 未闭合导致 `SyntaxError` | 已采纳 | 删除残缺段，保留按来源分组的完整逻辑 |
 | 2026-06-11 | **修复引用来源 `?-?`**：重建索引 + 改检索/Prompt 链路，使 `[来源: 文件名:行号-行号]` 正常显示 | 已采纳 | 见下文「2026-06-11 — 引用标注修复」 |
 | 2026-06-11 | **环境**：`ModuleNotFoundError: gradio` → 需先 `.\.venv\Scripts\Activate.ps1` 再 `python app.py` | 已采纳 | 未激活 venv 时会用系统 Python |
+| 2026-06-11 | **两阶段检索增强**：`USE_TWO_STAGE_RETRIEVAL`；意图分类 + query 重加权 + chunk 过滤；先试行方案 A（多意图并集）后改为**方案 C（主任务 + 约束）** | 已采纳 | 见下文「两阶段检索增强」 |
+| 2026-06-11 | **扩大服务范围 Prompt**：`SYSTEM_PROMPT` 覆盖体育/餐饮/自习/活动场地；修复「推荐吃早饭」被 LLM 误判越界 | 已采纳 | 规则 `is_out_of_scope` 未拦，系旧 Prompt 只写「体育场馆」 |
+| 2026-06-11 | **运动检索统一化**：新增 `sport_terms.py`；足球/篮球/排球等与羽毛球同逻辑；修复「踢足球」误命中游泳馆/自习 | 已采纳 | 分词、`sport_focus` 过滤、全库补捞 |
 
 > **维护约定**：每完成一轮有意义的协作（定方案、改模块、联调、写报告段落等），在表中追加一行，并同步更新「当前进度」与「待办」。
 
@@ -47,8 +50,8 @@
 ```
 knowledge/*.md
     → indexer.py --rebuild → data/chunks.json + embeddings.npz（本机）
-用户问题 → retriever.py（语义向量，可回退关键词）
-         → conversation.py + prompts.py
+用户问题 → retriever.py（语义向量 + 关键词；sport_terms 运动归一化）
+         → conversation.py + prompts.py（可选两阶段：主任务/约束过滤，USE_TWO_STAGE_RETRIEVAL）
          → main.py（CLI）/ app.py（Gradio）→ llm.py(DeepSeek)
 ```
 
@@ -56,7 +59,8 @@ knowledge/*.md
 |------|------|----------|
 | `indexer.py` / `embedder.py` | P1 切块、P2 向量化；本地离线加载 | 已提交 |
 | `retriever.py` | 语义检索；无向量时回退关键词 | 已联调 |
-| `conversation.py` / `prompts.py` | P3 多轮 + 边界 | 已联调 |
+| `conversation.py` / `prompts.py` | P3 多轮 + 边界；两阶段检索增强（方案 C） | 已联调 |
+| `sport_terms.py` | 体育运动词表（足球/篮球/羽毛球等统一匹配） | 已提交 |
 | `main.py` / `app.py` | CLI / Gradio 入口（共用 Conversation） | 已联调 |
 | `data/chunks.json` | RAG 切块索引 | 6 段（2 个示例 md） |
 | `data/embeddings.npz` | 向量索引 | 本机已生成（gitignore，队友需 `--rebuild`） |
@@ -74,7 +78,8 @@ knowledge/*.md
 - [x] **Git push**（2026-06-04 收工前已完成）  
 - [ ] `knowledge/` **≥15 个**本校场馆 `.md` → `--rebuild` → 复测并更新报告图  
 - [ ] 实验报告 **§一、二、三、五**（背景、方案、过程、总结）  
-- [x] **P6 引用标注（部分）**：检索/Prompt 已支持 `start_line`/`end_line`；`indexer.py` 切块记录行号；回答可标注 `[来源: 东区大食堂.md:13-26]` 等  
+- [x] **P6 引用标注（部分）**：检索/Prompt 已支持 `start_line`/`end_line`；回答可标注 `[来源: 东区大食堂.md:13-26]` 等  
+- [x] **检索增强（进阶）**：两阶段检索（方案 C 主任务+约束）+ `sport_terms.py` 运动词表；`config.py` 中 `USE_TWO_STAGE_RETRIEVAL = True`  
 - [ ] P6 剩余：有无 RAG 对比实验写入报告  
 - [ ] 按 `docs/测试用例.md` 补测 T3–T6（追问「第二个」、`reset` 等）
 
@@ -220,6 +225,50 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 - **验证**：查询「东区大食堂晚餐」时，参考资料示例为 `（来源: 东区大食堂.md:13-26）` 休闲餐厅段；重启 `python app.py` 后 LLM 可照抄具体行号。  
 - **维护约定**：`knowledge/*.md` 增删改后须 `python indexer.py --rebuild`，否则行号与文件不一致会再次退化。
 
+### 2026-06-11 — 两阶段检索增强（方案 C）
+
+- **动机**：单轮向量检索对「餐饮 vs 自习」「运动 vs 自习」等复合或易混 query 噪声大；希望在检索与拼 Prompt 前做轻量意图约束。  
+- **配置**：`config.example.py` / `config.py` 增加 `USE_TWO_STAGE_RETRIEVAL = True`；`conversation.py` 在开关开启时走增强链路。  
+- **方案演进**：  
+  1. **初版**：单意图 + `exclude_docs`（餐饮排除自习等）  
+  2. **方案 A（已弃用）**：多意图并集保留、交集排除——可缓解「近食堂自习」但会把餐饮与自习段落等量塞进 Prompt  
+  3. **方案 C（当前）**：`parse_query_roles()` 拆 **主任务**（如「供我自习」→ 自习）与 **约束**（如「近食堂」→ 餐饮）；过滤按主任务，约束词放宽 exclude 并附少量地标文档  
+- **主要函数**（`prompts.py`）：
+
+| 函数 | 作用 |
+|------|------|
+| `parse_query_roles` | 主任务 + 约束 + `sport_focus` |
+| `build_enhanced_retrieval_query` | 多轮上下文 + `_REWEIGHT_STRIP` 弱化泛词 |
+| `filter_chunks_by_roles` | 主任务过滤、约束重排、运动不匹配时全库补捞 |
+| `build_enhanced_rag_user_message` | 过滤后拼 Prompt，标题 `【意图分类】主任务：…；约束：…` |
+
+- **复合需求示例**：「离食堂近…供我自习」→ 主任务自习 + 约束餐饮；保留 `自习-*.md`（含「距食堂」字段）+ 少量食堂地标，不再只推东区大食堂。  
+- **坑与修复（运动类）**：  
+  - `reweight_query` 误删「羽毛球」→ 检索词变成「我想打」→ 古籍馆自习霸榜  
+  - 过滤为空时曾**回退全部 chunks** → LLM 对着自习资料说「没有羽毛球场」  
+  - 修复：`_REWEIGHT_STRIP` 只剥泛词；检索用用户原话；过滤无运动命中则全库按 `sport_focus` 补捞  
+
+### 2026-06-11 — 服务范围 Prompt 与早餐误拒
+
+- **现象**：「推荐我一个地方吃早饭」未被 `is_out_of_scope()` 拦截，但 LLM 称只做「体育场馆」、拒绝餐饮推荐。  
+- **原因**：`SYSTEM_PROMPT` 仍限定体育场馆，与已扩展的食堂/自习知识库不一致。  
+- **处理**：`SYSTEM_PROMPT` / `OUT_OF_SCOPE_REPLY` 写明体育、餐饮、自习、活动场地均属范围；`app.py` 示例问题增加早饭推荐。  
+
+### 2026-06-11 — 运动项目统一检索（`sport_terms.py`）
+
+- **动机**：「踢足球」分词碎裂为「踢足」、关键词误命中游泳馆；需与羽毛球一样按**具体运动项目**过滤与排序。  
+- **新增** `sport_terms.py`：`SPORT_ENTITIES` 含足球/篮球/排球/羽毛球/乒乓球/网球/游泳/健身/跑步/橄榄球等 20+ 项；每项 `aliases`（踢足球、打篮球…）+ `match`（足球场、篮球场…）。  
+- **联动改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `sport_terms.py` | 新建；`extract_sports_from_query`、`chunk_matches_sports`、`sport_match_score` |
+| `prompts.py` | `sport_focus` 写入 roles；运动类主任务只保留匹配该运动的 chunk；无命中则 `_sport_backup_chunks` |
+| `retriever.py` | 分词优先 `SPORT_PHRASES`；`build_sport_synonyms()`；有具体运动时忽略单字「打/踢」加分 |
+
+- **验证**：「我想去踢足球」→ 五人制足球场、紫云足球场入 Prompt，不含游泳馆；羽毛球/篮球/排球同类 query 正常。  
+- **扩展方式**：在 `SPORT_ENTITIES` 增一项即可；知识库无对应 md 时仍走「资料未记载」模板。  
+
 ---
 
 ## 变更文件索引（便于 diff / 报告附录）
@@ -232,10 +281,14 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 | `docs/实验报告.md` §4 | CLI + 网页测试实录 |
 | `app.py` | P5 Gradio 入口 |
 | `README.md` | 含「网页使用说明（Gradio）」 |
-| `prompts.py` | 2026-06-11：修复合并语法错误 + 按段落标注来源行号 |
-| `retriever.py` | 2026-06-11：`retrieve_for_prompt` 段落展开保留行号 |
-| `test_retriever.py` | 2026-06-11：引用行号自检 |
-| `data/chunks.json` | 2026-06-11：rebuild 后 308 段含 `start_line`/`end_line` |
+| `prompts.py` | 引用行号；两阶段检索（方案 C）；`sport_focus` 运动过滤 |
+| `retriever.py` | 段落展开行号；`sport_terms` 分词与同义词；泛化动词降噪 |
+| `sport_terms.py` | **新建**：体育运动词表与匹配工具 |
+| `conversation.py` | 两阶段开关；检索用用户原话 + 增强 query 合并 |
+| `config.example.py` | `USE_TWO_STAGE_RETRIEVAL`、`MAX_SECTIONS_IN_PROMPT` |
+| `app.py` | 示例「推荐吃早饭」；服务范围与 Prompt 对齐 |
+| `test_retriever.py` | 引用行号自检 |
+| `data/chunks.json` | rebuild 后 308 段含 `start_line`/`end_line` |
 | `scripts/render_terminal_screenshot.py` | 可选：根据终端文本生成示意图 |
 | `Cursor/User/settings.json` | 仅用户本机；为 docx/Markdown 编辑器关联，**不属于项目仓库** |
 
@@ -271,4 +324,4 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 
 ---
 
-*最后更新：2026-06-11（Git 同步排错 + 引用标注 `?-?` 修复 + 索引 rebuild；待重启 app 复测并更新报告 P6 段落）*
+*最后更新：2026-06-11（引用标注 + 两阶段检索方案 C + 运动词表 `sport_terms.py` + Prompt 服务范围扩展；改 `knowledge/` 或运动词表后重启 `app.py` 并视情况 `indexer --rebuild`）*

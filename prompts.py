@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import re
 
+from sport_terms import (
+    chunk_matches_sports,
+    extract_sports_from_query,
+    sport_match_score,
+)
+
 try:
     import config
 except ImportError:
@@ -87,7 +93,7 @@ INTENT_CATEGORIES: dict[str, dict] = {
         "exclude_docs": ["自习", "体育馆", "操场", "球场", "游泳馆"],
     },
     "运动": {
-        "keywords": ["运动", "打球", "跑步", "健身", "游泳", "篮球", "足球", "羽毛球", "乒乓球", "体育"],
+        "keywords": ["运动", "打球", "踢球", "跑步", "健身", "游泳", "体育"],
         "target_docs": ["体育馆", "操场", "球场", "游泳馆", "健身房", "田径", "气膜"],
         "exclude_docs": ["自习", "食堂", "餐厅", "餐吧"],
     },
@@ -99,20 +105,135 @@ INTENT_CATEGORIES: dict[str, dict] = {
 }
 
 
-def classify_intent(query: str) -> tuple[str, list[str], list[str]]:
-    """识别用户意图，返回 (意图标签, 目标文档关键词, 排除文档关键词)。"""
+# 主任务句式：识别「供我自习」「用来打球」等目的表达
+_PURPOSE_PATTERNS = [
+    re.compile(r"供(?:我|咱们|大家)?(.{0,12})?(自习|学习|看书|复习|备考|刷题)"),
+    re.compile(r"(?:用于|用来|去做)(.{0,12})?(自习|学习|打球|吃饭|就餐|开会|会议|游泳|健身)"),
+    re.compile(
+        r"(?:想|要)(?:去|在)?(.{0,15})?(自习|学习|打球|踢球|踢足球|打篮球|打排球|打羽毛球|打乒乓球|打网球|跑步|健身|游泳|吃饭|就餐|早餐|午餐|晚餐|开会|会议)"
+    ),
+]
+
+# 约束句式：识别「离食堂近」「方便吃饭」等地标/条件
+_CONSTRAINT_PATTERNS = [
+    re.compile(r"(?:离|靠近|邻近|临近|在旁边|近)(.{0,8}?)(食堂|餐厅|教学楼|图书馆|宿舍|体育馆|餐吧)"),
+    re.compile(r"方便(.{0,6}?)(吃饭|就餐|用餐)"),
+]
+
+# 动作词 → 意图类别
+_ACTION_TO_INTENT: dict[str, str] = {
+    "自习": "自习",
+    "学习": "自习",
+    "看书": "自习",
+    "复习": "自习",
+    "备考": "自习",
+    "刷题": "自习",
+    "吃饭": "餐饮",
+    "就餐": "餐饮",
+    "早餐": "餐饮",
+    "午餐": "餐饮",
+    "晚餐": "餐饮",
+    "打球": "运动",
+    "踢球": "运动",
+    "踢足球": "运动",
+    "打篮球": "运动",
+    "打排球": "运动",
+    "打羽毛球": "运动",
+    "打乒乓球": "运动",
+    "打网球": "运动",
+    "跑步": "运动",
+    "健身": "运动",
+    "游泳": "运动",
+    "开会": "会议/活动",
+    "会议": "会议/活动",
+}
+
+
+def _score_intents(query: str) -> list[tuple[int, str]]:
     q = query.lower()
-    best_category = None
-    best_score = 0
+    scored: list[tuple[int, str]] = []
     for category, cfg in INTENT_CATEGORIES.items():
         score = sum(1 for kw in cfg["keywords"] if kw in q)
-        if score > best_score:
-            best_score = score
-            best_category = category
-    if best_category and best_score > 0:
-        cat = INTENT_CATEGORIES[best_category]
-        return best_category, cat["target_docs"], cat["exclude_docs"]
-    return "通用", [], []
+        if score > 0:
+            scored.append((score, category))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+
+def _intent_from_action(action: str) -> str | None:
+    return _ACTION_TO_INTENT.get(action)
+
+
+def parse_query_roles(query: str) -> dict:
+    """
+    方案 C：分解为主任务 + 约束条件。
+    返回 main_intent、constraint_labels、constraint_keywords。
+    """
+    q = query.strip()
+    scored = _score_intents(q)
+    hit_labels = [cat for _, cat in scored]
+
+    main_intent: str | None = None
+    for pat in _PURPOSE_PATTERNS:
+        m = pat.search(q)
+        if m:
+            main_intent = _intent_from_action(m.group(2))
+            if main_intent:
+                break
+
+    if not main_intent and hit_labels:
+        main_intent = hit_labels[0]
+    if not main_intent:
+        main_intent = "通用"
+
+    constraint_labels = [label for label in hit_labels if label != main_intent]
+
+    constraint_keywords: list[str] = []
+    for pat in _CONSTRAINT_PATTERNS:
+        for m in pat.finditer(q):
+            constraint_keywords.append(m.group(2))
+    for label in constraint_labels:
+        for kw in INTENT_CATEGORIES[label]["keywords"]:
+            if kw in q and kw not in constraint_keywords:
+                constraint_keywords.append(kw)
+        for kw in INTENT_CATEGORIES[label]["target_docs"]:
+            if kw not in constraint_keywords:
+                constraint_keywords.append(kw)
+    # 知识库字段常见写法
+    if any(k in q for k in ("食堂", "吃饭", "就餐", "用餐")):
+        for extra in ("距食堂", "大食堂"):
+            if extra not in constraint_keywords:
+                constraint_keywords.append(extra)
+
+    return {
+        "main_intent": main_intent,
+        "constraint_labels": constraint_labels,
+        "constraint_keywords": constraint_keywords,
+        "sport_focus": extract_sports_from_query(q),
+    }
+
+
+def format_query_roles_label(roles: dict) -> str:
+    main = roles["main_intent"]
+    if main == "通用":
+        return "通用"
+    constraints = roles["constraint_labels"]
+    if not constraints:
+        return f"主任务：{main}"
+    return f"主任务：{main}；约束：{'、'.join(constraints)}"
+
+
+def classify_intent(query: str) -> tuple[str, list[str], list[str]]:
+    """兼容旧接口：按主任务返回 target / exclude（约束词会从 exclude 中剔除）。"""
+    roles = parse_query_roles(query)
+    main = roles["main_intent"]
+    if main == "通用":
+        return "通用", [], []
+
+    cat = INTENT_CATEGORIES[main]
+    excludes = _effective_excludes(roles)
+    label = format_query_roles_label(roles)
+    return label, cat["target_docs"], excludes
 
 
 def _chunk_doc_fields(chunk: dict) -> tuple[str, str, str]:
@@ -122,46 +243,211 @@ def _chunk_doc_fields(chunk: dict) -> tuple[str, str, str]:
     return title, source, text
 
 
+def _chunk_matches_keywords(chunk: dict, keywords: list[str]) -> bool:
+    if not keywords:
+        return False
+    title, source, text = _chunk_doc_fields(chunk)
+    haystack = f"{title} {source}"
+    return any(kw in haystack or kw in text for kw in keywords)
+
+
+def _effective_excludes(roles: dict) -> list[str]:
+    """主任务 exclude 中，与约束条件冲突的项不再排除。"""
+    main = roles["main_intent"]
+    if main == "通用":
+        return []
+    excludes = list(INTENT_CATEGORIES[main].get("exclude_docs", []))
+    if not roles["constraint_labels"]:
+        return excludes
+
+    constraint_tokens = set(roles["constraint_keywords"])
+    for label in roles["constraint_labels"]:
+        constraint_tokens.update(INTENT_CATEGORIES[label]["keywords"])
+        constraint_tokens.update(INTENT_CATEGORIES[label]["target_docs"])
+
+    return [
+        ex
+        for ex in excludes
+        if not any(ex in tok or tok in ex for tok in constraint_tokens)
+    ]
+
+
+# query 重加权时只剥离泛化词，保留「羽毛球」「食堂」等具体检索词
+_REWEIGHT_STRIP: dict[str, list[str]] = {
+    "自习": ["学习", "看书", "复习", "备考", "刷题", "安静"],
+    "餐饮": ["吃", "吃饭", "就餐", "用餐", "外卖", "美食", "餐饮", "饭堂"],
+    "运动": ["运动", "体育", "打球", "跑步", "健身"],
+    "会议/活动": ["活动", "聚会", "团建", "讲座", "排练", "社团"],
+}
+
+
+def _chunk_matches_main_task(chunk: dict, roles: dict, query: str) -> bool:
+    """主任务匹配：运动类优先按具体项目词；其余按 target_docs。"""
+    main = roles["main_intent"]
+    if main == "通用":
+        return True
+
+    sports = roles.get("sport_focus") or extract_sports_from_query(query)
+    if main == "运动" and sports:
+        return chunk_matches_sports(chunk, sports)
+
+    cat = INTENT_CATEGORIES[main]
+    if _chunk_matches_keywords(chunk, cat["target_docs"]):
+        return True
+    for kw in cat["keywords"]:
+        if len(kw) >= 2 and kw in query and _chunk_matches_keywords(chunk, [kw]):
+            return True
+    return False
+
+
+def _sport_backup_chunks(roles: dict, query: str, excludes: list[str]) -> list[dict]:
+    """从全库按具体运动项目补捞段落。"""
+    sports = roles.get("sport_focus") or extract_sports_from_query(query)
+    if not sports:
+        return []
+    try:
+        from retriever import load_chunks
+
+        index_pool = load_chunks()
+    except ImportError:
+        return []
+
+    backup: list[dict] = []
+    for c in index_pool:
+        if excludes and _chunk_matches_keywords(c, excludes):
+            continue
+        if chunk_matches_sports(c, sports):
+            backup.append(c)
+    backup.sort(key=lambda c: sport_match_score(c, sports), reverse=True)
+    max_n = getattr(config, "MAX_SECTIONS_IN_PROMPT", 12)
+    return backup[:max_n]
+
+
 def filter_chunks_by_intent(
     chunks: list[dict],
     intent_label: str,
     target_keywords: list[str],
     exclude_keywords: list[str],
 ) -> list[dict]:
-    """根据意图对检索结果进行第一轮过滤。"""
+    """单意图过滤（保留兼容）。"""
     if intent_label == "通用" or not chunks:
         return chunks
 
     filtered: list[dict] = []
     for c in chunks:
-        title, source, text = _chunk_doc_fields(c)
-        haystack = f"{title} {source}"
-
-        if exclude_keywords and any(kw in haystack or kw in text for kw in exclude_keywords):
+        if exclude_keywords and _chunk_matches_keywords(c, exclude_keywords):
             continue
-        if target_keywords and not any(kw in haystack or kw in text for kw in target_keywords):
+        if target_keywords and not _chunk_matches_keywords(c, target_keywords):
             continue
         filtered.append(c)
     return filtered
 
 
-def reweight_query(query: str, intent_label: str) -> str:
-    """弱化 query 中的意图关键词，让向量检索更关注具体描述（人数、地点等）。"""
-    if intent_label == "通用":
+def _constraint_match_score(chunk: dict, constraint_keywords: list[str]) -> int:
+    if not constraint_keywords:
+        return 0
+    title, source, text = _chunk_doc_fields(chunk)
+    haystack = f"{title} {source} {text}"
+    return sum(1 for kw in constraint_keywords if kw in haystack)
+
+
+def filter_chunks_by_roles(chunks: list[dict], roles: dict, query: str = "") -> list[dict]:
+    """
+    方案 C：按主任务筛 target，约束条件下放宽 exclude，并按约束词重排。
+    另附少量约束地标文档（如食堂概况）供选址参考。
+    """
+    main = roles["main_intent"]
+    if main == "通用":
+        return chunks
+
+    excludes = _effective_excludes(roles)
+    pool = list(chunks)
+    if not pool and query:
+        try:
+            from retriever import load_chunks
+
+            pool = load_chunks()
+        except ImportError:
+            pool = []
+
+    filtered: list[dict] = []
+    for c in pool:
+        if excludes and _chunk_matches_keywords(c, excludes):
+            continue
+        if not _chunk_matches_main_task(c, roles, query):
+            continue
+        filtered.append(c)
+
+    sports = roles.get("sport_focus") or extract_sports_from_query(query)
+    sport_matched = sports and any(chunk_matches_sports(c, sports) for c in filtered)
+    if sports and not sport_matched:
+        filtered = _sport_backup_chunks(roles, query, excludes)
+    elif not filtered and query and main == "运动":
+        filtered = _sport_backup_chunks(roles, query, excludes)
+    elif not filtered and query:
+        try:
+            from retriever import load_chunks
+
+            index_pool = load_chunks()
+        except ImportError:
+            index_pool = []
+        backup: list[dict] = []
+        for c in index_pool:
+            if excludes and _chunk_matches_keywords(c, excludes):
+                continue
+            if _chunk_matches_main_task(c, roles, query):
+                backup.append(c)
+        max_n = getattr(config, "MAX_SECTIONS_IN_PROMPT", 12)
+        filtered = backup[:max_n]
+
+    if sports:
+        filtered.sort(key=lambda c: sport_match_score(c, sports), reverse=True)
+    elif roles["constraint_keywords"]:
+        filtered.sort(
+            key=lambda c: _constraint_match_score(c, roles["constraint_keywords"]),
+            reverse=True,
+        )
+
+    if roles["constraint_labels"]:
+        seen = {c.get("id") for c in filtered}
+        landmark_targets: list[str] = []
+        for label in roles["constraint_labels"]:
+            landmark_targets.extend(INTENT_CATEGORIES[label]["target_docs"])
+        landmarks: list[dict] = []
+        for c in chunks:
+            cid = c.get("id")
+            if cid in seen:
+                continue
+            if _chunk_matches_keywords(c, landmark_targets):
+                landmarks.append(c)
+                seen.add(cid)
+            if len(landmarks) >= 2:
+                break
+        filtered = filtered + landmarks
+
+    return filtered
+
+
+def reweight_query(query: str, roles: dict) -> str:
+    """有约束时保留完整 query；单主任务时仅弱化泛化词，保留羽毛球/食堂等具体词。"""
+    main = roles["main_intent"]
+    if main == "通用":
+        return query
+    if roles["constraint_labels"]:
         return query
 
     cleaned = query
-    for kw in INTENT_CATEGORIES[intent_label]["keywords"]:
+    for kw in _REWEIGHT_STRIP.get(main, []):
         cleaned = cleaned.replace(kw, "")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or query
 
 
 def build_enhanced_retrieval_query(current: str, raw_history: list[tuple[str, str]]) -> str:
-    """两阶段增强：意图识别 + query 重加权，再拼多轮上下文。"""
+    """两阶段增强（方案 C）：主任务/约束分解 + query 重加权。"""
     current = current.strip()
-    intent_label, _, _ = classify_intent(current)
-    weighted = reweight_query(current, intent_label)
+    roles = parse_query_roles(current)
+    weighted = reweight_query(current, roles)
     if not raw_history:
         return weighted
     last_user, _ = raw_history[-1]
@@ -169,14 +455,13 @@ def build_enhanced_retrieval_query(current: str, raw_history: list[tuple[str, st
 
 
 def build_enhanced_rag_user_message(query: str, chunks: list[dict]) -> str:
-    """两阶段增强：意图过滤 chunks 后再拼 Prompt；过滤为空时回退原始结果。"""
-    intent_label, target_kws, exclude_kws = classify_intent(query)
-    filtered = filter_chunks_by_intent(chunks, intent_label, target_kws, exclude_kws)
-    if not filtered and chunks:
-        filtered = chunks
+    """两阶段增强（方案 C）：主任务过滤 + 约束重排；无命中时不塞入无关段落。"""
+    roles = parse_query_roles(query)
+    filtered = filter_chunks_by_roles(chunks, roles, query)
     msg = build_rag_user_message(query, filtered)
-    if intent_label != "通用":
-        msg = f"【意图分类】{intent_label}\n\n{msg}"
+    label = format_query_roles_label(roles)
+    if label != "通用":
+        msg = f"【意图分类】{label}\n\n{msg}"
     return msg
 
 

@@ -7,6 +7,15 @@ from pathlib import Path
 
 import numpy as np
 
+from sport_terms import (
+    SPORT_GENERIC_VERBS,
+    SPORT_PHRASES,
+    build_sport_synonyms,
+    chunk_matches_sports,
+    extract_sports_from_query,
+    sport_match_score,
+)
+
 try:
     import config
 except ImportError:
@@ -221,8 +230,10 @@ def _retrieve_vector(query: str, top_k: int) -> list[dict]:
 
 def _simple_tokenize(text: str) -> list[str]:
     """简单的中文分词：按常见词分割"""
-    # 按长度从长到短排序，优先匹配长词
-    common_words = sorted([
+    # 按长度从长到短排序，优先匹配长词（运动短语优先，避免「踢足球」被拆碎）
+    common_words = sorted(
+        list(SPORT_PHRASES)
+        + [
         '五人制', '七人制', '十一人制',
         '羽毛球场', '篮球场', '足球场', '排球场', '网球场', '游泳馆', '健身房',
         '田径场', '风雨操场', '灯光球场', '气膜馆',
@@ -239,7 +250,9 @@ def _simple_tokenize(text: str) -> list[str]:
         '散步', '慢跑', '慢走', '走走', '校园散步', '饭后散步',
         # 单字常见词
         '我', '你', '他', '她', '它', '要', '能', '会', '想', '去', '来', '做', '看', '听', '说', '问', '答', '找', '给', '拿', '放', '走', '跑', '跳', '打'
-    ], key=lambda x: -len(x))
+    ],
+        key=lambda x: -len(x),
+    )
     
     tokens = []
     i = 0
@@ -268,22 +281,12 @@ def _simple_tokenize(text: str) -> list[str]:
     return tokens
 
 def _retrieve_keyword(query: str, top_k: int) -> list[dict]:
-    # 运动项目同义词映射
-    sport_synonyms = {
-        '踢球': ['足球', '足球场', '五人制', '五人'],
-        '足球': ['足球', '足球场', '五人制', '五人'],
+    sport_synonyms = build_sport_synonyms()
+    sport_synonyms.update({
         '五人': ['五人制', '足球场', '足球'],
         '五个': ['五人制', '五人'],
-        '羽毛球': ['羽毛球', '羽毛球场'],
-        '篮球': ['篮球', '篮球场', '室内篮球'],
         '室内篮球': ['室内', '篮球场', '风雨操场'],
         '室内': ['风雨操场', '室内', '体育馆'],
-        '排球': ['排球', '排球场'],
-        '网球': ['网球', '网球场'],
-        '游泳': ['游泳', '游泳馆'],
-        '健身': ['健身', '健身房'],
-        '跑步': ['跑步', '田径'],
-        '田径': ['田径', '跑步'],
         # 收费相关词汇
         '收费': ['收费', '免费', '价格', '费用', '多少钱', '价格', '票价', '办卡', '卡类', '单次'],
         '免费': ['免费', '收费', '价格', '费用', '刷校园卡', '免费进入', '不想花钱', '不花钱', '省钱'],
@@ -309,7 +312,7 @@ def _retrieve_keyword(query: str, top_k: int) -> list[dict]:
         '慢跑': ['慢跑', '散步', '慢走', '田径', '田径场'],
         '慢走': ['慢走', '散步', '慢跑', '田径', '田径场'],
         '走': ['散步', '慢跑', '慢走', '田径', '田径场'],
-    }
+    })
     
     chunks = load_chunks()
     if chunks:
@@ -317,8 +320,15 @@ def _retrieve_keyword(query: str, top_k: int) -> list[dict]:
         scored: list[tuple[int, dict]] = []
         q_tokens = _simple_tokenize(q)
         
+        sport_focus = extract_sports_from_query(query)
+        sport_query_tokens = {
+            t
+            for t in q_tokens
+            if t in sport_synonyms or t in SPORT_PHRASES
+        }
         for c in chunks:
             text = c.get("text", "").lower()
+            source = (c.get("source", "") or "").lower()
             score = 0
             is_free = '免费' in text
             for token in q_tokens:
@@ -330,13 +340,17 @@ def _retrieve_keyword(query: str, top_k: int) -> list[dict]:
                 # 运动项目同义词匹配
                 elif token in sport_synonyms:
                     for synonym in sport_synonyms[token]:
-                        if synonym in text:
+                        if synonym in text or synonym in source:
                             score += 2.5
                             break
-                # 单字匹配
+                # 单字匹配（已有具体运动项目词时，忽略「打/踢」等泛化单字）
                 elif len(token) == 1:
+                    if token in SPORT_GENERIC_VERBS and (sport_query_tokens or sport_focus):
+                        continue
                     if token in text:
                         score += 0.5
+            if sport_focus and chunk_matches_sports(c, sport_focus):
+                score += sport_match_score(c, sport_focus) * 2
             # 如果查询中包含免费相关词汇，对免费场馆给予额外分数加成
             free_query_tokens = {'免费', '不花钱', '不想花钱', '省钱', '免费进入'}
             has_free_intent = any(t in q_tokens for t in free_query_tokens)
