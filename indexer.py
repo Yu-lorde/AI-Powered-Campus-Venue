@@ -32,8 +32,8 @@ def embeddings_path() -> Path:
 
 def chunk_markdown(text: str, source: str) -> list[dict]:
     """
-    按 Markdown 二级标题 ## 切块；无 ## 时整篇为一组。
-    任务书要求 knowledge/ 下 ≥15 个场馆 .md 文件；文件内可用 ## 分小节便于 RAG 检索（不计入 15 的计数）。
+    按 Markdown 二级标题 ## 切块，无 ## 时整篇为一组。
+    记录每个段落的起始行号和结束行号（用于引用标注）。
     """
     min_chars = getattr(config, "CHUNK_MIN_CHARS", 30)
     stem = Path(source).stem
@@ -41,28 +41,52 @@ def chunk_markdown(text: str, source: str) -> list[dict]:
     if not text:
         return []
 
-    parts = re.split(r"\n(?=##\s+)", text)
-    if len(parts) <= 1:
-        parts = [text]
-
+    # 把全文按行拆分，方便计算行号
+    lines = text.splitlines()
+    
+    # 找到所有 ## 标题的行号
+    header_indices = []
+    for i, line in enumerate(lines):
+        if re.match(r'^##\s+', line):
+            header_indices.append(i)
+    
+    parts = []  # 每个元素: (start_line, end_line, content)
+    
+    if len(header_indices) == 0:
+        # 没有 ## 标题，整篇作为一个段落
+        content = '\n'.join(lines)
+        if len(content) >= min_chars:
+            parts.append((0, len(lines) - 1, content))
+    else:
+        # 有 ## 标题，按标题切分
+        for idx, start_idx in enumerate(header_indices):
+            # 确定结束行：下一个标题的前一行，或文件末尾
+            if idx + 1 < len(header_indices):
+                end_idx = header_indices[idx + 1] - 1
+            else:
+                end_idx = len(lines) - 1
+            # 从标题行开始到结束行
+            content = '\n'.join(lines[start_idx:end_idx + 1])
+            if len(content) >= min_chars:
+                parts.append((start_idx, end_idx, content))
+    
     chunks: list[dict] = []
-    for i, part in enumerate(parts):
+    for i, (start_line, end_line, part) in enumerate(parts):
         part = part.strip()
         if len(part) < min_chars:
             continue
-        lines = part.splitlines()
-        title = lines[0].lstrip("#").strip() if lines else stem
-        chunk_id = f"{stem}__{i}"
-        chunks.append(
-            {
-                "id": chunk_id,
-                "source": source,
-                "title": title,
-                "text": part,
-            }
-        )
+        part_lines = part.splitlines()
+        title = part_lines[0].lstrip("#").strip() if part_lines else stem
+        chunk_id = f"{stem}_{i}"
+        chunks.append({
+            "id": chunk_id,
+            "source": source,
+            "title": title,
+            "text": part,
+            "start_line": start_line + 1,  # 转为 1-based 行号（人类习惯）
+            "end_line": end_line + 1,
+        })
     return chunks
-
 
 def build_chunks() -> list[dict]:
     root = Path(config.KNOWLEDGE_DIR)
