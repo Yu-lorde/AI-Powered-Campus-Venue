@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+try:
+    import config
+except ImportError:
+
+    class config:  # type: ignore
+        USE_TWO_STAGE_RETRIEVAL = True
+
 from llm import LLMError, chat
 from prompts import (
     OUT_OF_SCOPE_REPLY,
     SYSTEM_PROMPT,
+    build_enhanced_rag_user_message,
+    build_enhanced_retrieval_query,
     build_rag_user_message,
     build_retrieval_query,
     is_out_of_scope,
@@ -35,9 +44,14 @@ class Conversation:
             self.messages.append({"role": "assistant", "content": answer})
             return answer
 
-        retrieval_q = build_retrieval_query(user_input, self.raw_history)
-        chunks = retrieve_for_prompt(retrieval_q)
-        user_msg = build_rag_user_message(user_input, chunks)
+        if getattr(config, "USE_TWO_STAGE_RETRIEVAL", True):
+            retrieval_q = build_enhanced_retrieval_query(user_input, self.raw_history)
+            chunks = retrieve_for_prompt(retrieval_q)
+            user_msg = build_enhanced_rag_user_message(user_input, chunks)
+        else:
+            retrieval_q = build_retrieval_query(user_input, self.raw_history)
+            chunks = retrieve_for_prompt(retrieval_q)
+            user_msg = build_rag_user_message(user_input, chunks)
 
         self.messages.append({"role": "user", "content": user_msg})
         try:

@@ -69,6 +69,113 @@ def build_retrieval_query(current: str, raw_history: list[tuple[str, str]]) -> s
     )
 
 
+# ========== 两阶段检索增强 ==========
+
+INTENT_CATEGORIES: dict[str, dict] = {
+    "自习": {
+        "keywords": ["自习", "学习", "看书", "复习", "备考", "刷题", "安静"],
+        "target_docs": ["自习", "图书馆", "教室", "阅览室"],
+        "exclude_docs": ["食堂", "餐厅", "体育馆", "操场"],
+    },
+    "餐饮": {
+        "keywords": ["吃", "吃饭", "食堂", "餐厅", "饭堂", "餐饮", "美食", "就餐", "用餐", "外卖", "晚餐", "午餐", "早餐"],
+        "target_docs": ["食堂", "餐厅", "餐吧", "咖啡厅", "便利店"],
+        "exclude_docs": ["自习", "体育馆", "操场", "球场", "游泳馆"],
+    },
+    "运动": {
+        "keywords": ["运动", "打球", "跑步", "健身", "游泳", "篮球", "足球", "羽毛球", "乒乓球", "体育"],
+        "target_docs": ["体育馆", "操场", "球场", "游泳馆", "健身房", "田径", "气膜"],
+        "exclude_docs": ["自习", "食堂", "餐厅", "餐吧"],
+    },
+    "会议/活动": {
+        "keywords": ["开会", "会议", "活动", "讲座", "排练", "社团", "聚会", "团建"],
+        "target_docs": ["会议室", "报告厅", "多功能", "活动中心", "路演"],
+        "exclude_docs": [],
+    },
+}
+
+
+def classify_intent(query: str) -> tuple[str, list[str], list[str]]:
+    """识别用户意图，返回 (意图标签, 目标文档关键词, 排除文档关键词)。"""
+    q = query.lower()
+    best_category = None
+    best_score = 0
+    for category, cfg in INTENT_CATEGORIES.items():
+        score = sum(1 for kw in cfg["keywords"] if kw in q)
+        if score > best_score:
+            best_score = score
+            best_category = category
+    if best_category and best_score > 0:
+        cat = INTENT_CATEGORIES[best_category]
+        return best_category, cat["target_docs"], cat["exclude_docs"]
+    return "通用", [], []
+
+
+def _chunk_doc_fields(chunk: dict) -> tuple[str, str, str]:
+    title = (chunk.get("title", "") or chunk.get("name", "")).lower()
+    source = (chunk.get("source", "") or "").lower()
+    text = (chunk.get("text", "") or chunk.get("content", "")).lower()
+    return title, source, text
+
+
+def filter_chunks_by_intent(
+    chunks: list[dict],
+    intent_label: str,
+    target_keywords: list[str],
+    exclude_keywords: list[str],
+) -> list[dict]:
+    """根据意图对检索结果进行第一轮过滤。"""
+    if intent_label == "通用" or not chunks:
+        return chunks
+
+    filtered: list[dict] = []
+    for c in chunks:
+        title, source, text = _chunk_doc_fields(c)
+        haystack = f"{title} {source}"
+
+        if exclude_keywords and any(kw in haystack or kw in text for kw in exclude_keywords):
+            continue
+        if target_keywords and not any(kw in haystack or kw in text for kw in target_keywords):
+            continue
+        filtered.append(c)
+    return filtered
+
+
+def reweight_query(query: str, intent_label: str) -> str:
+    """弱化 query 中的意图关键词，让向量检索更关注具体描述（人数、地点等）。"""
+    if intent_label == "通用":
+        return query
+
+    cleaned = query
+    for kw in INTENT_CATEGORIES[intent_label]["keywords"]:
+        cleaned = cleaned.replace(kw, "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or query
+
+
+def build_enhanced_retrieval_query(current: str, raw_history: list[tuple[str, str]]) -> str:
+    """两阶段增强：意图识别 + query 重加权，再拼多轮上下文。"""
+    current = current.strip()
+    intent_label, _, _ = classify_intent(current)
+    weighted = reweight_query(current, intent_label)
+    if not raw_history:
+        return weighted
+    last_user, _ = raw_history[-1]
+    return f"上一轮用户问题：{last_user}\n本轮追问：{weighted}"
+
+
+def build_enhanced_rag_user_message(query: str, chunks: list[dict]) -> str:
+    """两阶段增强：意图过滤 chunks 后再拼 Prompt；过滤为空时回退原始结果。"""
+    intent_label, target_kws, exclude_kws = classify_intent(query)
+    filtered = filter_chunks_by_intent(chunks, intent_label, target_kws, exclude_kws)
+    if not filtered and chunks:
+        filtered = chunks
+    msg = build_rag_user_message(query, filtered)
+    if intent_label != "通用":
+        msg = f"【意图分类】{intent_label}\n\n{msg}"
+    return msg
+
+
 def build_rag_user_message(query: str, chunks: list[dict]) -> str:
     """将检索结果拼入本轮 user 消息（写入对话 history）。"""
     if not chunks:

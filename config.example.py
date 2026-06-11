@@ -39,3 +39,7 @@ TOP_K = 5
 # 向量检索先取若干 chunk，再按 md 文件合并后送入 Prompt
 RETRIEVE_POOL_SIZE = 20
 MAX_VENUES_IN_PROMPT = 3
+MAX_SECTIONS_IN_PROMPT = 12
+
+# 两阶段检索增强：意图分类预筛选 + query 重加权（见 prompts.py）
+USE_TWO_STAGE_RETRIEVAL = True
