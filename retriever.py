@@ -116,6 +116,8 @@ def merge_hits_by_source(hits: list[dict], max_sources: int | None = None) -> li
             same = [h for h in hits if h.get("source") == src]
             text = "\n\n".join(h.get("text", "") for h in same)
         stem = Path(src).stem
+        start_line = parts[0].get("start_line", "?") if parts else "?"
+        end_line = parts[-1].get("end_line", "?") if parts else "?"
         merged.append(
             {
                 "source": src,
@@ -124,18 +126,47 @@ def merge_hits_by_source(hits: list[dict], max_sources: int | None = None) -> li
                 "text": text,
                 "content": text,
                 "score": round(best_score[src], 4),
+                "start_line": start_line,
+                "end_line": end_line,
             }
         )
     return merged
 
 
 def retrieve_for_prompt(query: str, max_sources: int | None = None) -> list[dict]:
-    """检索供 Prompt 使用：先扩大 chunk 池，再按 md 文件合并为完整条目。"""
+    """检索供 Prompt 使用：命中文件后展开为带行号的 ## 段落列表。"""
     pool = getattr(config, "RETRIEVE_POOL_SIZE", None)
     if pool is None:
         pool = max(getattr(config, "TOP_K", 5) * 4, 20)
     hits = retrieve(query, top_k=pool)
-    return merge_hits_by_source(hits, max_sources)
+    max_sources = max_sources or getattr(config, "MAX_VENUES_IN_PROMPT", 3)
+
+    source_order: list[str] = []
+    best_score: dict[str, float] = {}
+    for h in hits:
+        src = h.get("source", "")
+        if not src:
+            continue
+        score = float(h.get("score", 0) or 0)
+        if src not in best_score:
+            source_order.append(src)
+            best_score[src] = score
+        else:
+            best_score[src] = max(best_score[src], score)
+
+    all_by_source = _chunks_grouped_by_source()
+    sections: list[dict] = []
+    for src in source_order[:max_sources]:
+        file_score = best_score[src]
+        parts = all_by_source.get(src)
+        if parts:
+            for part in parts:
+                sections.append(_normalize_hit(part, file_score))
+        else:
+            for h in hits:
+                if h.get("source") == src:
+                    sections.append(h)
+    return sections
 
 
 def _retrieve_vector(query: str, top_k: int) -> list[dict]:

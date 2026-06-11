@@ -24,6 +24,10 @@
 | 2026-06-04 | **P5 Gradio**：新增 `app.py`，共用 `Conversation`；`requirements.txt` 增加 gradio | 已采纳 | `python app.py` → http://127.0.0.1:7860 |
 | 2026-06-04 | P5 网页联调（篮球场馆推荐）；`app.py` 加 `inbrowser=True`；README 网页使用说明 | 已采纳 | 图 2：`docs/image/实验报告/gradio-p5-2026-06-04.png` |
 | 2026-06-04 | 实验报告 §4 整理（CLI 图 1 + Gradio 图 2）；**Git 已全部 push** | 已完成 | 今日收工，见「暂停接续备忘」 |
+| 2026-06-11 | **Git 同步**：`git pull` 因本地改动 `prompts.py`/`retriever.py` 冲突；`git reset --hard origin/main` 对齐远程 5 个提交 | 已采纳 | 合并后远程 `prompts.py` 含语法残留，见下行 |
+| 2026-06-11 | **修复 `prompts.py` 语法错误**：`build_rag_user_message` 两段合并代码叠在一起，`blocks.append(` 未闭合导致 `SyntaxError` | 已采纳 | 删除残缺段，保留按来源分组的完整逻辑 |
+| 2026-06-11 | **修复引用来源 `?-?`**：重建索引 + 改检索/Prompt 链路，使 `[来源: 文件名:行号-行号]` 正常显示 | 已采纳 | 见下文「2026-06-11 — 引用标注修复」 |
+| 2026-06-11 | **环境**：`ModuleNotFoundError: gradio` → 需先 `.\.venv\Scripts\Activate.ps1` 再 `python app.py` | 已采纳 | 未激活 venv 时会用系统 Python |
 
 > **维护约定**：每完成一轮有意义的协作（定方案、改模块、联调、写报告段落等），在表中追加一行，并同步更新「当前进度」与「待办」。
 
@@ -70,7 +74,8 @@ knowledge/*.md
 - [x] **Git push**（2026-06-04 收工前已完成）  
 - [ ] `knowledge/` **≥15 个**本校场馆 `.md` → `--rebuild` → 复测并更新报告图  
 - [ ] 实验报告 **§一、二、三、五**（背景、方案、过程、总结）  
-- [ ] 可选 P6：引用标注、有无 RAG 对比实验  
+- [x] **P6 引用标注（部分）**：检索/Prompt 已支持 `start_line`/`end_line`；`indexer.py` 切块记录行号；回答可标注 `[来源: 东区大食堂.md:13-26]` 等  
+- [ ] P6 剩余：有无 RAG 对比实验写入报告  
 - [ ] 按 `docs/测试用例.md` 补测 T3–T6（追问「第二个」、`reset` 等）
 
 ### 4. 建议的下一步（优先级）
@@ -188,6 +193,33 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 - **回退**：无向量时 `retriever` 对 `chunks.json` 做关键词检索，仍可跑 `test_retriever.py`。  
 - **用户状态**：P0 `test_llm.py` 已成功；稍后回来按「暂停接续备忘」继续。
 
+### 2026-06-11 — Git 同步与合并后排错
+
+- **背景**：本地 `main` 落后 `origin/main` 5 个提交；本地曾改 `prompts.py`、`retriever.py`，`git pull` 被拒绝。  
+- **处理**：执行 `git fetch origin` + `git reset --hard origin/main` 强制对齐远程（**本地未提交改动已丢弃**）。  
+- **文件标黄说明**：资源管理器中黄色 `M` = Git 未提交修改，**不是**合并冲突；仓库内无 `<<<<<<<` 冲突标记。  
+- **Gradio 报错**：未激活 `.venv` 时 `python app.py` 报 `No module named 'gradio'`；激活虚拟环境后正常。  
+- **语法错误**：远程合并后的 `prompts.py` 在 `build_rag_user_message` 处两段代码拼接不完整，运行报 `SyntaxError: '(' was never closed`，已手工修复。
+
+### 2026-06-11 — 引用标注修复（P6）
+
+- **现象**：Gradio 回答中来源显示为 `[来源: 东区大食堂.md:?-?]`，无法对应知识库具体段落。  
+- **根因（两层）**：  
+  1. `data/chunks.json` 为旧索引，chunk 无 `start_line`/`end_line` 字段（合并分支后未 `--rebuild`）。  
+  2. `retrieve_for_prompt` → `merge_hits_by_source` 按文件合并时丢弃行号；`build_rag_user_message` 只取第一个 chunk 的行号，多段落时无法逐条引用。  
+- **改动摘要**：
+
+| 文件 | 改动 |
+|------|------|
+| `indexer.py` | （远程已有）按 `##` 切块时写入 `start_line`/`end_line`（1-based） |
+| `data/chunks.json` | 执行 `python indexer.py --rebuild`，308 段，含行号 |
+| `retriever.py` | `retrieve_for_prompt` 改为命中文件后**按段落展开**，每段保留行号；`merge_hits_by_source` 合并时附带首尾行号 |
+| `prompts.py` | `build_rag_user_message` 每段参考资料单独标注 `（来源: 文件:起-止）`；SYSTEM_PROMPT 要求 LLM 不得写 `?-?` |
+| `test_retriever.py` | 自检改为验证展开段落含行号且字段完整 |
+
+- **验证**：查询「东区大食堂晚餐」时，参考资料示例为 `（来源: 东区大食堂.md:13-26）` 休闲餐厅段；重启 `python app.py` 后 LLM 可照抄具体行号。  
+- **维护约定**：`knowledge/*.md` 增删改后须 `python indexer.py --rebuild`，否则行号与文件不一致会再次退化。
+
 ---
 
 ## 变更文件索引（便于 diff / 报告附录）
@@ -200,6 +232,10 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 | `docs/实验报告.md` §4 | CLI + 网页测试实录 |
 | `app.py` | P5 Gradio 入口 |
 | `README.md` | 含「网页使用说明（Gradio）」 |
+| `prompts.py` | 2026-06-11：修复合并语法错误 + 按段落标注来源行号 |
+| `retriever.py` | 2026-06-11：`retrieve_for_prompt` 段落展开保留行号 |
+| `test_retriever.py` | 2026-06-11：引用行号自检 |
+| `data/chunks.json` | 2026-06-11：rebuild 后 308 段含 `start_line`/`end_line` |
 | `scripts/render_terminal_screenshot.py` | 可选：根据终端文本生成示意图 |
 | `Cursor/User/settings.json` | 仅用户本机；为 docx/Markdown 编辑器关联，**不属于项目仓库** |
 
@@ -235,4 +271,4 @@ P0–P3、P5 已完成并已 push；知识库仍仅 2 个示例 md。
 
 ---
 
-*最后更新：2026-06-04 收工（P5 Gradio + 报告 §4 双截图 + README + 已 push；下次补 knowledge 与报告正文）*
+*最后更新：2026-06-11（Git 同步排错 + 引用标注 `?-?` 修复 + 索引 rebuild；待重启 app 复测并更新报告 P6 段落）*

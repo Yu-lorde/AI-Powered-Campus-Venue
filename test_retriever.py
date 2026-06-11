@@ -39,11 +39,12 @@ def main() -> None:
             preview = h["text"][:60].replace("\n", " ")
             print(f"  - {h['title']} score={sc} | {preview}...")
 
-    print("\n--- 按 source 合并（Prompt 用）---")
-    merged = retrieve_for_prompt("文韵丹青咖啡店怎么样")
-    assert merged, "应有命中"
-    top = merged[0]
-    assert "插座" in top["text"], "合并后应含插座字段"
-    assert "距食堂" in top["text"], "合并后应含距食堂字段"
-    print(f"  文韵丹青合并后字段完整：{top['source']}")
-    print(f"  Prompt 条数：{len(merged)}")
+    print("\n--- 按 source 展开段落（Prompt 用）---")
+    sections = retrieve_for_prompt("文韵丹青咖啡店怎么样")
+    assert sections, "应有命中"
+    combined = "\n".join(s["text"] for s in sections)
+    assert "插座" in combined, "展开后应含插座字段"
+    assert "距食堂" in combined, "展开后应含距食堂字段"
+    assert sections[0].get("start_line") not in (None, "?"), "段落应含行号"
+    print(f"  文韵丹青展开后字段完整：{sections[0]['source']}")
+    print(f"  Prompt 段落数：{len(sections)}")
