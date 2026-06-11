@@ -13,6 +13,7 @@ from llm import LLMError, chat
 from prompts import (
     OUT_OF_SCOPE_REPLY,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_NO_KB,
     build_enhanced_rag_user_message,
     build_enhanced_retrieval_query,
     build_rag_user_message,
@@ -25,11 +26,19 @@ from retriever import retrieve_for_prompt
 class Conversation:
     """维护 DeepSeek messages 历史，支持连续追问与边界处理。"""
 
-    def __init__(self) -> None:
+    def __init__(self, use_kb: bool = True) -> None:
+        """初始化对话。
+
+        Args:
+            use_kb: 是否使用知识库。True 使用 RAG，False 纯 LLM（用于对比实验）
+        """
+        self.use_kb = use_kb
         self.reset()
 
     def reset(self) -> None:
-        self.messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # 根据是否使用知识库选择系统提示词
+        system_prompt = SYSTEM_PROMPT_NO_KB if not self.use_kb else SYSTEM_PROMPT
+        self.messages: list[dict] = [{"role": "system", "content": system_prompt}]
         # (用户原始输入, 助手回复)，仅用于检索 query 改写
         self.raw_history: list[tuple[str, str]] = []
 
@@ -44,7 +53,11 @@ class Conversation:
             self.messages.append({"role": "assistant", "content": answer})
             return answer
 
-        if getattr(config, "USE_TWO_STAGE_RETRIEVAL", True):
+        # 根据初始化时的设置决定是否使用知识库
+        if not self.use_kb:
+            # 不使用知识库：直接用用户原始问题
+            user_msg = user_input
+        elif getattr(config, "USE_TWO_STAGE_RETRIEVAL", True):
             retrieval_q = build_enhanced_retrieval_query(user_input, self.raw_history)
             # 检索始终用用户原话，避免 reweight 削弱「羽毛球」等具体词
             chunks = retrieve_for_prompt(user_input)
