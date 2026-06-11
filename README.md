@@ -112,6 +112,58 @@ python indexer.py --rebuild
 - **索引文件**：`data/chunks.json` 可提交；`data/embeddings.npz` 体积大已 gitignore，队友 clone 后需本地 `--rebuild`。
 - **模型下载**：Embedding 需从 HuggingFace 拉模型；连不上时可设 `$env:HF_ENDPOINT = "https://hf-mirror.com"` 再执行 `indexer.py --rebuild`（见 P1P2 教程）。
 
+## 配置同步脚本
+
+新成员拉取代码后，需要运行同步脚本将 `config.example.py` 中的新配置同步到本地 `config.py`：
+
+```bash
+python sync_config.py
+```
+
+脚本会自动检测并添加缺失的配置项（如 `USE_KNOWLEDGE_BASE`、`USE_TWO_STAGE_RETRIEVAL` 等），**不会覆盖已有的配置**（如 API Key）。
+
+## 对比实验
+
+本项目提供了自动化对比实验脚本，用于验证 RAG 知识库对回答质量的影响。
+
+### 运行对比实验
+
+```bash
+python run_comparison.py
+```
+
+脚本会自动对 15 个测试问题分别以「带知识库」和「不带知识库」两种模式运行，并生成：
+- `comparison_results_时间戳.json` - 原始实验数据
+- `comparison_results_时间戳_report.md` - 详细对比报告
+
+### 手动对比测试
+
+也可以手动切换模式测试：
+
+```python
+# config.py
+USE_KNOWLEDGE_BASE = True   # 带知识库（RAG 模式）
+# USE_KNOWLEDGE_BASE = False  # 不带知识库（纯 LLM 模式）
+```
+
+改完后运行 `python app.py` 即可测试。
+
+### 测试问题集
+
+测试问题定义在 `test_questions.json` 中，包含 15 个覆盖不同维度的问题：
+
+| 类型 | 说明 |
+|------|------|
+| 事实性 | 开放时间、收费标准等具体信息 |
+| 推荐性 | 根据需求推荐场馆 |
+| 对比性 | 对比不同场馆的特点 |
+| 约束性 | 带条件限制的查询 |
+| 综合性 | 需要综合多个方面回答 |
+| 细节性 | 询问具体细节 |
+| 边界性 | 测试系统边界能力 |
+
+如需修改测试问题，直接编辑 `test_questions.json` 即可。
+
 ## 环境要求
 
 - Python 3.10+
