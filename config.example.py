@@ -43,3 +43,8 @@ MAX_SECTIONS_IN_PROMPT = 12
 
 # 两阶段检索增强：意图分类预筛选 + query 重加权（见 prompts.py）
 USE_TWO_STAGE_RETRIEVAL = True
+
+# ========== 对比实验开关 ==========
+# True = 正常使用知识库（RAG 模式）
+# False = 不使用知识库（纯 LLM 模式，用于对比实验）
+USE_KNOWLEDGE_BASE = True
