@@ -31,15 +31,6 @@
 
 ## 快速开始
 
-| 阶段 | 教程 |
-|------|------|
-| P0 跑通 API + CLI | [`docs/P0入门实战.md`](docs/P0入门实战.md) |
-| P1/P2 切块 + 向量检索 | [`docs/P1P2入门实战.md`](docs/P1P2入门实战.md) |
-| P3 多轮 + 边界 | `python test_conversation.py` → `python main.py`（支持 `reset`） |
-| P5 网页界面 | `python app.py`（浏览器打开 http://127.0.0.1:7860 ） |
-
-简要步骤（P0 完成后继续）：
-
 1. 安装依赖：`pip install -r requirements.txt`
 2. 配置：`Copy-Item config.example.py config.py`（DeepSeek Key + 向量相关项见 example）
 3. 构建索引：`python indexer.py --rebuild`（改 knowledge 后都要重做）
@@ -50,7 +41,7 @@
 
 ## 网页使用说明（Gradio）
 
-与命令行 `main.py` **共用同一套** `Conversation`（RAG + 多轮 + 边界），适合答辩演示。
+与命令行 `main.py` **共用同一套** `Conversation`（RAG + 多轮 + 边界）
 
 ### 启动
 
@@ -105,16 +96,12 @@ python indexer.py --rebuild
 
 - **虚拟环境**：新开终端需再执行 `.\.venv\Scripts\Activate.ps1`，看到 `(.venv)` 再运行命令。
 - **解释器**：在 Cursor 中运行脚本时，请选项目 `.venv` 里的 Python。
-- **响应较慢**：`main.py` / `app.py` 需联网调用 DeepSeek，调试时把问题写短一些。
 - **Gradio**：若 7860 端口被占用，可在 `app.py` 末尾把 `server_port` 改为其他端口。
 - **检索不准**：可调 `config.py` 中 `SIMILARITY_THRESHOLD`（如 0.25～0.45）；修改 `knowledge/` 后必须 `python indexer.py --rebuild`。
-- **知识库数量**：任务书要求 `knowledge/` 下 **≥15 个**场馆 `.md` 文件（每个馆一份，如 `东区体育馆.md`）。文件内的 `##` 小节只影响 RAG 切块条数，不等于 15 份资料。
-- **索引文件**：`data/chunks.json` 可提交；`data/embeddings.npz` 体积大已 gitignore，队友 clone 后需本地 `--rebuild`。
-- **模型下载**：Embedding 需从 HuggingFace 拉模型；连不上时可设 `$env:HF_ENDPOINT = "https://hf-mirror.com"` 再执行 `indexer.py --rebuild`（见 P1P2 教程）。
 
 ## 配置同步脚本
 
-新成员拉取代码后，需要运行同步脚本将 `config.example.py` 中的新配置同步到本地 `config.py`：
+拉取代码后，需要运行同步脚本将 `config.example.py` 中的新配置同步到本地 `config.py`：
 
 ```bash
 python sync_config.py
